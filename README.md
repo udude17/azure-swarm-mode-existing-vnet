@@ -5,6 +5,6 @@ This repository contains 1. all my favourite azure commands and 2. all my favour
 # Commands
 
 ## Login
-```azure login
+    azure login
 
 ## Select Subscription
