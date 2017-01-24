@@ -1,0 +1,536 @@
+{
+  "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "projectNamePrefix": {
+      "type": "string",
+      "metadata": {
+        "description": "All generated resources are prefixed with this value. Can also be empty"
+      }
+    },
+    "managerVmSize": {
+      "type": "string",
+      "defaultValue": "Standard_DS1_v2"
+    },
+    "workerVmSize": {
+      "type": "string",
+      "defaultValue": "Standard_DS1_v2"
+    },
+    "managerVmCount": {
+      "type": "int",
+      "defaultValue": 3
+    },
+    "workerVmCount": {
+      "type": "int",
+      "defaultValue": 3
+    },
+    "publicIPsAllocationMethod": {
+      "type": "string",
+      "defaultValue": "Dynamic",
+      "allowedValues": [
+        "Static",
+        "Dynamic"
+      ]
+    },
+    "adminUsername": {
+      "type": "string",
+      "defaultValue": "swarmadmin"
+    },
+    "adminPassword": {
+      "type": "string",
+      "defaultValue": "willchangetoSSH#17"
+    },
+    "adminPublicKey": {
+      "type": "string",
+      "defaultValue": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC0d2IU8yXLTLQNdLw5aV+XjDeJMCZZzGc5tXKIN2qpaUlSWvxW1QXBnFNk7PvhHtr/zidckHKKCIY4a2+CHpdjMq179skxKs20hdy7XeTGdzztISjW7WJK6VqPL9LzGajzzT78tIw+Pg/FkkTWow2clzfOYK2NKdV8CJJMYvTb+sRFqVrsSDNVnjeuDY+2o99kxlpOXpZL//A/eRBRn6VspcqFY55sUua7v0Dl0eXWGQkNNYE6vmori+j0u7SV5t5ncUuqjB7h35lYI1Ou1HrMJDpYrngn6gNlgI0JrGced4XBKAoztz/JqB4xMMFJiT8d/0v3GFRXQDTy9SQ5tElTPo8k4JlNgXfPNYYi9YixoAj98r8844ASReg26SeUBmGYH4Bnc6t/0lCLsrj7d5FVZN1nizHX67CmFEppARS9hm81hgf1nlehAQmraglN8WLYGAxttkJX6U2tdEpRZTK3f+UeA7vqUmF+EK7Co/L/d0wNC2ZPhOP06PKiHgsHSZN0qqdRMJfwBpn/1wJMPguMMXUYDmCx5kv2LxIazXHIlPZ1T0ZztgP81SinPNYNNkDlNah7ccqXPp+iqx/E+gEgm1hL/a1slKKtclq1b29TR/nIRFeam9IRn39A7/ICBRQZb6A81UAERkycxn5Q8x9g8e9vUDUSTLd6jmCjgeP9Dw== default"
+    }
+  },
+  "variables": {
+    "storageAccountName": "[concat(parameters('projectNamePrefix'), 'storage')]",
+    "swarmVNetName": "[concat(parameters('projectNamePrefix'), '-swarm-vnet')]",
+    "swarmVNetSubnetName": "[concat(parameters('projectNamePrefix'), '-swarm-vnet-subnet')]",
+    "workerLbIPName": "[concat(parameters('projectNamePrefix'), '-ip-workerLb')]",
+    "workerLbName": "[concat(parameters('projectNamePrefix'), '-lb-workerLb')]",
+    "managerVmNamePrefix": "[concat(parameters('projectNamePrefix'), '-vm-manager-')]",
+    "managerVmNicNamePrefix": "[concat(variables('managerVmNamePrefix'), 'nic-')]",
+    "workerVmNamePrefix": "[concat(variables('workerScaleSetName'), '-vm-')]",
+    "workerScaleSetName": "[concat(parameters('projectNamePrefix'), '-vmss-worker')]",
+    "jumpVmName": "[concat(parameters('projectNamePrefix'), '-vm-jumpVM')]",
+    "jumpVmNicName": "[concat(parameters('projectNamePrefix'), '-nic-jumpVM')]",
+    "jumpVmIpName": "[concat(parameters('projectNamePrefix'), '-ip-jumpVM')]",
+    "jumpVmNsgName": "[concat(parameters('projectNamePrefix'), '-nsg-jumpVM')]",
+    "workerLbID": "[resourceId('Microsoft.Network/loadBalancers',variables('workerLbName'))]",
+    "workerLbFrontEndIPConfigID": "[concat(variables('workerLbID'),'/frontendIPConfigurations/loadBalancerFrontend')]",
+    "swarmVNetID": "[resourceId('Microsoft.Network/virtualNetworks',variables('swarmVNetName'))]",
+    "swarmVNetSubnetRef": "[concat(variables('swarmVNetID'),'/subnets/',variables ('swarmVNetSubnetName'))]",
+    "workerLbDnsHost": "[concat( parameters('projectNamePrefix'), 'workerlb' )]"
+  },
+  "resources": [
+    {
+      "apiVersion": "2016-01-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[resourceGroup().location]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "sku": {
+        "name": "Standard_RAGRS"
+      },
+      "kind": "Storage",
+      "properties": {
+        "encryption": {
+          "services": {
+            "blob": {
+              "enabled": "false"
+            }
+          },
+          "keySource": "Microsoft.Storage"
+        }
+      }
+    },
+    {
+      "apiVersion": "2016-03-30",
+      "type": "Microsoft.Network/virtualNetworks",
+      "name": "[variables('swarmVNetName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.0.0.0/16"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('swarmVNetSubnetName')]",
+            "properties": {
+              "addressPrefix": "10.0.0.0/24"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2016-03-30",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[variables('workerLbIPName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "publicIPAllocationMethod": "[parameters('publicIPsAllocationMethod')]",
+        "dnsSettings": {
+          "domainNameLabel": "[variables('workerLbDnsHost')]"
+        }
+      }
+    },
+    {
+      "comments": "Public load balancer for accessing the workers",
+      "apiVersion": "2016-03-30",
+      "name": "[variables('workerLbName')]",
+      "type": "Microsoft.Network/loadBalancers",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/publicIPAddresses/', variables('workerLbIPName'))]"
+      ],
+      "properties": {
+        "frontendIPConfigurations": [
+          {
+            "name": "LoadBalancerFrontend",
+            "properties": {
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('workerLbIPName'))]"
+              }
+            }
+          }
+        ],
+        "backendAddressPools": [
+          {
+            "name": "WorkerBackendPool"
+          }
+        ],
+        "inboundNatPools": [
+          {
+            "name": "WorkerNatPool",
+            "properties": {
+              "frontendIPConfiguration": {
+                "id": "[variables('workerLbFrontEndIPConfigID')]"
+              },
+              "protocol": "tcp",
+              "frontendPortRangeStart": 50000,
+              "frontendPortRangeEnd": 50119,
+              "backendPort": 22
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[concat(variables('managerVmNicNamePrefix'), copyIndex())]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/virtualNetworks/', variables('swarmVNetName'))]"
+      ],
+      "copy": {
+        "name": "managerNicLoop",
+        "count": "[parameters('managerVmCount')]"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('swarmVNetSubnetRef')]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[concat(variables('managerVmNamePrefix'), copyIndex())]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2015-06-15",
+      "location": "[resourceGroup().location]",
+      "copy": {
+        "name": "managerVmLoop",
+        "count": "[parameters('managerVmCount')]"
+      },
+      "dependsOn": [
+        "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]",
+        "[concat('Microsoft.Network/networkInterfaces/', variables('managerVmNicNamePrefix'), copyIndex())]"
+      ],
+      "properties": {
+        "osProfile": {
+          "computerName": "[concat(variables('managerVmNamePrefix'), copyIndex())]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "linuxConfiguration": {
+            "disablePasswordAuthentication": "true",
+            "ssh": {
+              "publicKeys": [
+                {
+                  "path": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
+                  "keyData": "[parameters('adminPublicKey')]"
+                }
+              ]
+            }
+          }
+        },
+        "hardwareProfile": {
+          "vmSize": "[parameters('managerVmSize')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04.0-LTS",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "[concat(variables('managerVmNamePrefix'), copyIndex())]",
+            "createOption": "fromImage",
+            "vhd": {
+              "uri": "[concat('https://',variables('storageAccountName'),'.blob.core.windows.net/vhds/',variables('managerVmNamePrefix'), copyIndex(), '.vhd')]"
+            }
+          },
+          "dataDisks": []
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('managerVmNicNamePrefix'), copyIndex()))]"
+            }
+          ]
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": "true",
+            "storageUri": "[concat('http://',variables('storageAccountName'),'.blob.core.windows.net')]"
+          }
+        }
+      }
+    },
+    {
+      "comments": "At first make sure to provision manager node 0 as the first one! The following nodes will join the swarm via this one",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "name": "[concat(variables('managerVmNamePrefix'), '0', '/managermastercustom')]",
+      "apiVersion": "2015-05-01-preview",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[concat('Microsoft.Compute/virtualMachines/', variables('managerVmNamePrefix'), '0')]"
+      ],
+      "properties": {
+        "publisher": "Microsoft.Azure.Extensions",
+        "type": "CustomScript",
+        "typeHandlerVersion": "2.0",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "fileUris": [
+            "http://home.stiffi.de:8000/provisionSwarmVM.py",
+            "http://home.stiffi.de:8000/installaptpackages.sh"
+          ],
+          "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
+        }
+      }
+    },
+    {
+      "comments": "Now provision manager vm 1-n",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "name": "[concat(variables('managerVmNamePrefix'), copyIndex(1), '/managercustom')]",
+      "apiVersion": "2015-05-01-preview",
+      "location": "[resourceGroup().location]",
+      "copy": {
+        "name": "managerExtensionLoop",
+        "count": "[sub(parameters('managerVmCount'), 1)]"
+      },
+      "dependsOn": [
+        "[concat('Microsoft.Compute/virtualMachines/', variables('managerVmNamePrefix'), copyIndex(1))]",
+        "[resourceId('Microsoft.Compute/virtualMachines/extensions', concat(variables('managerVmNamePrefix'), '0'), 'managermastercustom')]"
+      ],
+      "properties": {
+        "publisher": "Microsoft.Azure.Extensions",
+        "type": "CustomScript",
+        "typeHandlerVersion": "2.0",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "fileUris": [
+            "http://home.stiffi.de:8000/provisionSwarmVM.py",
+            "http://home.stiffi.de:8000/installaptpackages.sh"
+          ],
+          "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachineScaleSets",
+      "name": "[variables('workerScaleSetName')]",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2016-03-30",
+      "dependsOn": [
+        "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]",
+        "[concat('Microsoft.Network/virtualNetworks/', variables('swarmVNetName'))]",
+        "[concat('Microsoft.Network/loadBalancers/', variables('workerLbName'))]",
+        "managerExtensionLoop"
+      ],
+      "sku": {
+        "name": "[parameters('workerVmSize')]",
+        "tier": "Standard",
+        "capacity": "[parameters('workerVmCount')]"
+      },
+      "properties": {
+        "overprovision": "true",
+        "upgradePolicy": {
+          "mode": "Manual"
+        },
+        "virtualMachineProfile": {
+          "storageProfile": {
+            "osDisk": {
+              "name": "workerdisk",
+              "caching": "ReadOnly",
+              "createOption": "FromImage",
+              "vhdContainers": [
+                "[concat( 'https://', variables('storageAccountName'), '.blob.core.windows.net/workervmvhd' )]"
+              ]
+            },
+            "imageReference": {
+              "publisher": "Canonical",
+              "offer": "UbuntuServer",
+              "sku": "16.04.0-LTS",
+              "version": "latest"
+            }
+          },
+          "osProfile": {
+            "computerNamePrefix": "[variables('workerVmNamePrefix')]",
+            "adminUsername": "[parameters('adminUsername')]",
+            "adminPassword": "[parameters('adminPassword')]",
+            "linuxConfiguration": {
+              "disablePasswordAuthentication": "true",
+              "ssh": {
+                "publicKeys": [
+                  {
+                    "path": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
+                    "keyData": "[parameters('adminPublicKey')]"
+                  }
+                ]
+              }
+            }
+          },
+          "networkProfile": {
+            "networkInterfaceConfigurations": [
+              {
+                "name": "[concat( variables('workerVmNamePrefix'), '-nic' )]",
+                "properties": {
+                  "primary": "true",
+                  "ipConfigurations": [
+                    {
+                      "name": "[concat( variables('workerVmNamePrefix'), '-ipconfig' )]",
+                      "properties": {
+                        "subnet": {
+                          "id": "[variables('swarmVNetSubnetRef')]"
+                        },
+                        "loadBalancerBackendAddressPools": [
+                          {
+                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('workerLbName'), '/backendAddressPools/WorkerBackendPool')]"
+                          }
+                        ],
+                        "loadBalancerInboundNatPools": [
+                          {
+                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('workerLbName'), '/inboundNatPools/WorkerNatPool')]"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "extensionProfile": {
+            "extensions": [
+              {
+                "name": "provisionVssVm",
+                "properties": {
+                  "publisher": "Microsoft.Azure.Extensions",
+                  "type": "CustomScript",
+                  "typeHandlerVersion": "2.0",
+                  "autoUpgradeMinorVersion": true,
+                  "settings": {
+                    "fileUris": [
+                      "http://home.stiffi.de:8000/provisionSwarmVM.py",
+                      "http://home.stiffi.de:8000/installaptpackages.sh"
+                    ],
+                    "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role worker --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "comments": "Jump-VM for accessing e.g. the manager VMs via ssh",
+      "apiVersion": "2016-03-30",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[variables('jumpVmIpName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "publicIPAllocationMethod": "[parameters('publicIPsAllocationMethod')]"
+      }
+    },
+    {
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[variables('jumpVmNicName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/virtualNetworks/', variables('swarmVNetName'))]",
+        "[concat('Microsoft.Network/publicIPAddresses/', variables('jumpVmIpName'))]",
+        "[concat('Microsoft.Network/networkSecurityGroups/', variables('jumpVmNsgName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('swarmVNetSubnetRef')]"
+              },
+              "publicIpAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIpAddresses', variables('jumpVmIpName'))]"
+              }
+            }
+          }
+        ],
+        "networkSecurityGroup": {
+          "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('jumpVmNsgName'))]"
+        }
+      }
+    },
+    {
+      "name": "[variables('jumpVmName')]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2015-06-15",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]",
+        "[concat('Microsoft.Network/networkInterfaces/', variables('jumpVmNicName'))]"
+      ],
+      "properties": {
+        "osProfile": {
+          "computerName": "[variables('jumpVmName')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "linuxConfiguration": {
+            "disablePasswordAuthentication": "true",
+            "ssh": {
+              "publicKeys": [
+                {
+                  "path": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
+                  "keyData": "[parameters('adminPublicKey')]"
+                }
+              ]
+            }
+          }
+        },
+        "hardwareProfile": {
+          "vmSize": "Standard_A0"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04.0-LTS",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "[variables('jumpVmName')]",
+            "createOption": "fromImage",
+            "vhd": {
+              "uri": "[concat('https://',variables('storageAccountName'),'.blob.core.windows.net/vhds/',variables('jumpVmName'), '.vhd')]"
+            }
+          },
+          "dataDisks": []
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('jumpVmNicName'))]"
+            }
+          ]
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": "true",
+            "storageUri": "[concat('http://',variables('storageAccountName'),'.blob.core.windows.net')]"
+          }
+        }
+      }
+    },
+    {
+      "name": "[variables('jumpVmNsgName')]",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2016-09-01",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "default-allow-ssh",
+            "properties": {
+              "priority": 1000,
+              "sourceAddressPrefix": "*",
+              "protocol": "TCP",
+              "destinationPortRange": "22",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "outputs": {}
+}
