@@ -266,8 +266,8 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            "http://home.stiffi.de:8000/provisionSwarmVM.py",
-            "http://home.stiffi.de:8000/installaptpackages.sh"
+            "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/provisionSwarmVM.py",
+            "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/installaptpackages.sh"
           ],
           "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
         }
@@ -294,8 +294,8 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            "http://home.stiffi.de:8000/provisionSwarmVM.py",
-            "http://home.stiffi.de:8000/installaptpackages.sh"
+            "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/provisionSwarmVM.py",
+            "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/installaptpackages.sh"
           ],
           "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
         }
@@ -396,8 +396,8 @@
                   "autoUpgradeMinorVersion": true,
                   "settings": {
                     "fileUris": [
-                      "http://home.stiffi.de:8000/provisionSwarmVM.py",
-                      "http://home.stiffi.de:8000/installaptpackages.sh"
+                      "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/provisionSwarmVM.py",
+                      "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/installaptpackages.sh"
                     ],
                     "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role worker --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
                   }
