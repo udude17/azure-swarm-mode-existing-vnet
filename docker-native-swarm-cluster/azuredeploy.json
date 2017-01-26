@@ -43,12 +43,38 @@
     "adminPublicKey": {
       "type": "string",
       "defaultValue": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC0d2IU8yXLTLQNdLw5aV+XjDeJMCZZzGc5tXKIN2qpaUlSWvxW1QXBnFNk7PvhHtr/zidckHKKCIY4a2+CHpdjMq179skxKs20hdy7XeTGdzztISjW7WJK6VqPL9LzGajzzT78tIw+Pg/FkkTWow2clzfOYK2NKdV8CJJMYvTb+sRFqVrsSDNVnjeuDY+2o99kxlpOXpZL//A/eRBRn6VspcqFY55sUua7v0Dl0eXWGQkNNYE6vmori+j0u7SV5t5ncUuqjB7h35lYI1Ou1HrMJDpYrngn6gNlgI0JrGced4XBKAoztz/JqB4xMMFJiT8d/0v3GFRXQDTy9SQ5tElTPo8k4JlNgXfPNYYi9YixoAj98r8844ASReg26SeUBmGYH4Bnc6t/0lCLsrj7d5FVZN1nizHX67CmFEppARS9hm81hgf1nlehAQmraglN8WLYGAxttkJX6U2tdEpRZTK3f+UeA7vqUmF+EK7Co/L/d0wNC2ZPhOP06PKiHgsHSZN0qqdRMJfwBpn/1wJMPguMMXUYDmCx5kv2LxIazXHIlPZ1T0ZztgP81SinPNYNNkDlNah7ccqXPp+iqx/E+gEgm1hL/a1slKKtclq1b29TR/nIRFeam9IRn39A7/ICBRQZb6A81UAERkycxn5Q8x9g8e9vUDUSTLd6jmCjgeP9Dw== default"
+    },
+    "VirtualNetworkName": {
+      "type": "string",
+      "defaultValue": "VNET-100",  
+      "metadata": {
+        "description": "Existing VNET Name"
+      }
+    },
+    "VirtualNetworkResourceGroup": {
+      "type": "string",
+      "defaultValue": "VNET-100-RG", 
+      "metadata": {
+        "description": "Existing Resource Group VNET is deployed in"
+      }
+    },
+    "SubnetName": {
+      "type": "string",
+      "defaultValue": "Subnet-Swarm", 
+      "metadata": {
+        "description": "Existing subnet name to deploy Swarm cluster in to."
+      }
+    },
+    "TemplateUrl": {
+    "type": "string",
+    "defaultValue": "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/",
+     "metadata": {
+        "description": "The uri of script files to execute"
+      }
     }
   },
   "variables": {
     "storageAccountName": "[concat(parameters('projectNamePrefix'), 'storage')]",
-    "swarmVNetName": "[concat(parameters('projectNamePrefix'), '-swarm-vnet')]",
-    "swarmVNetSubnetName": "[concat(parameters('projectNamePrefix'), '-swarm-vnet-subnet')]",
     "workerLbIPName": "[concat(parameters('projectNamePrefix'), '-ip-workerLb')]",
     "workerLbName": "[concat(parameters('projectNamePrefix'), '-lb-workerLb')]",
     "managerVmNamePrefix": "[concat(parameters('projectNamePrefix'), '-vm-manager-')]",
@@ -61,9 +87,11 @@
     "jumpVmNsgName": "[concat(parameters('projectNamePrefix'), '-nsg-jumpVM')]",
     "workerLbID": "[resourceId('Microsoft.Network/loadBalancers',variables('workerLbName'))]",
     "workerLbFrontEndIPConfigID": "[concat(variables('workerLbID'),'/frontendIPConfigurations/loadBalancerFrontend')]",
-    "swarmVNetID": "[resourceId('Microsoft.Network/virtualNetworks',variables('swarmVNetName'))]",
-    "swarmVNetSubnetRef": "[concat(variables('swarmVNetID'),'/subnets/',variables ('swarmVNetSubnetName'))]",
-    "workerLbDnsHost": "[concat( parameters('projectNamePrefix'), 'workerlb' )]"
+    "swarmVNetID": "[resourceId(parameters('virtualNetworkResourceGroup'), 'Microsoft.Network/virtualNetworks', parameters('virtualNetworkName'))]",
+    "swarmVNetSubnetRef": "[concat(variables('swarmVNetID'),'/subnets/', parameters('SubnetName'))]",
+    "workerLbDnsHost": "[concat( parameters('projectNamePrefix'), 'workerlb' )]",
+    "scripturlpy": "[concat(parameters('TemplateUrl'), 'provisionSwarmVM.py')]",
+    "scripturlsh": "[concat(parameters('TemplateUrl'), 'pinstallaptpackages.sh')]"
   },
   "resources": [
     {
@@ -84,27 +112,6 @@
           },
           "keySource": "Microsoft.Storage"
         }
-      }
-    },
-    {
-      "apiVersion": "2016-03-30",
-      "type": "Microsoft.Network/virtualNetworks",
-      "name": "[variables('swarmVNetName')]",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "addressSpace": {
-          "addressPrefixes": [
-            "10.0.0.0/16"
-          ]
-        },
-        "subnets": [
-          {
-            "name": "[variables('swarmVNetSubnetName')]",
-            "properties": {
-              "addressPrefix": "10.0.0.0/24"
-            }
-          }
-        ]
       }
     },
     {
@@ -133,9 +140,10 @@
           {
             "name": "LoadBalancerFrontend",
             "properties": {
-              "publicIPAddress": {
-                "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('workerLbIPName'))]"
-              }
+              "subnet": {
+                "id": "[variables('swarmVNetSubnetRef')]"
+              },
+              "privateIPAllocationMethod": "Dynamic"
             }
           }
         ],
@@ -165,9 +173,6 @@
       "type": "Microsoft.Network/networkInterfaces",
       "name": "[concat(variables('managerVmNicNamePrefix'), copyIndex())]",
       "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "[concat('Microsoft.Network/virtualNetworks/', variables('swarmVNetName'))]"
-      ],
       "copy": {
         "name": "managerNicLoop",
         "count": "[parameters('managerVmCount')]"
@@ -266,8 +271,8 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/provisionSwarmVM.py",
-            "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/installaptpackages.sh"
+            ["[variables('scripturlpy')]",
+            ["[variables('scripturlsh')]"
           ],
           "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
         }
@@ -294,8 +299,8 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/provisionSwarmVM.py",
-            "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/installaptpackages.sh"
+            ["[variables('scripturlpy')]",
+            ["[variables('scripturlsh')]"
           ],
           "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
         }
@@ -308,7 +313,6 @@
       "apiVersion": "2016-03-30",
       "dependsOn": [
         "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]",
-        "[concat('Microsoft.Network/virtualNetworks/', variables('swarmVNetName'))]",
         "[concat('Microsoft.Network/loadBalancers/', variables('workerLbName'))]",
         "managerExtensionLoop"
       ],
@@ -395,10 +399,10 @@
                   "typeHandlerVersion": "2.0",
                   "autoUpgradeMinorVersion": true,
                   "settings": {
-                    "fileUris": [
-                      "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/provisionSwarmVM.py",
-                      "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/installaptpackages.sh"
-                    ],
+                     "fileUris": [
+                        ["[variables('scripturlpy')]",
+                        ["[variables('scripturlsh')]"
+                     ],
                     "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role worker --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
                   }
                 }
@@ -424,7 +428,6 @@
       "name": "[variables('jumpVmNicName')]",
       "location": "[resourceGroup().location]",
       "dependsOn": [
-        "[concat('Microsoft.Network/virtualNetworks/', variables('swarmVNetName'))]",
         "[concat('Microsoft.Network/publicIPAddresses/', variables('jumpVmIpName'))]",
         "[concat('Microsoft.Network/networkSecurityGroups/', variables('jumpVmNsgName'))]"
       ],
