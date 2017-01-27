@@ -5,16 +5,32 @@
     "projectNamePrefix": {
       "type": "string",
       "metadata": {
-        "description": "All generated resources are prefixed with this value. Can also be empty"
+        "description": "All generated resources are prefixed with this value."
       }
     },
     "managerVmSize": {
       "type": "string",
-      "defaultValue": "Standard_DS1_v2"
+      "defaultValue": "Standard_A2_v2",
+      "allowedValues": [
+        "Standard_A1_v2",
+        "Standard_A2_v2",
+        "Standard_A4_v2",
+        "Standard_D1_v2",
+        "Standard_D2_v2",
+        "Standard_D3_v2"
+      ]
     },
     "workerVmSize": {
       "type": "string",
-      "defaultValue": "Standard_DS1_v2"
+      "defaultValue": "Standard_A2_v2",
+      "allowedValues": [
+        "Standard_A1_v2",
+        "Standard_A2_v2",
+        "Standard_A4_v2",
+        "Standard_D1_v2",
+        "Standard_D2_v2",
+        "Standard_D3_v2"
+      ]
     },
     "managerVmCount": {
       "type": "int",
@@ -46,14 +62,14 @@
     },
     "VirtualNetworkName": {
       "type": "string",
-      "defaultValue": "VNET-100",  
+      "defaultValue": "VNET-ACS",  
       "metadata": {
         "description": "Existing VNET Name"
       }
     },
     "VirtualNetworkResourceGroup": {
       "type": "string",
-      "defaultValue": "VNET-100-RG", 
+      "defaultValue": "VNET-ACS-RG", 
       "metadata": {
         "description": "Existing Resource Group VNET is deployed in"
       }
@@ -65,6 +81,13 @@
         "description": "Existing subnet name to deploy Swarm cluster in to."
       }
     },
+    "SubnetNameJumpVM": {
+      "type": "string",
+      "defaultValue": "Subnet-Jump", 
+      "metadata": {
+        "description": "Existing subnet name to deploy Jump VM in to."
+      }
+    },
     "TemplateUrl": {
     "type": "string",
     "defaultValue": "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/",
@@ -74,7 +97,7 @@
     }
   },
   "variables": {
-    "storageAccountName": "[concat(parameters('projectNamePrefix'), 'storage')]",
+    "storageAccountName": "[substring(toLower(concat(parameters('projectNamePrefix'), uniquestring(resourceGroup().id), '0000000000','disk')), 0, 22)]",
     "workerLbIPName": "[concat(parameters('projectNamePrefix'), '-ip-workerLb')]",
     "workerLbName": "[concat(parameters('projectNamePrefix'), '-lb-workerLb')]",
     "managerVmNamePrefix": "[concat(parameters('projectNamePrefix'), '-vm-manager-')]",
@@ -89,7 +112,12 @@
     "workerLbFrontEndIPConfigID": "[concat(variables('workerLbID'),'/frontendIPConfigurations/loadBalancerFrontend')]",
     "swarmVNetID": "[resourceId(parameters('virtualNetworkResourceGroup'), 'Microsoft.Network/virtualNetworks', parameters('virtualNetworkName'))]",
     "swarmVNetSubnetRef": "[concat(variables('swarmVNetID'),'/subnets/', parameters('SubnetName'))]",
-    "workerLbDnsHost": "[concat( parameters('projectNamePrefix'), 'workerlb' )]",
+    "JumpVNetSubnetRef": "[concat(variables('swarmVNetID'),'/subnets/', parameters('SubnetNameJumpVM'))]",
+    "workerLbDnsHost": "[concat(parameters('projectNamePrefix'), 'workerlb' )]",
+    "agentprivateLbBackendPoolName": "[concat(parameters('projectNamePrefix'), 'backendpool' )]",
+    "agentprivateLbID": "[resourceId('Microsoft.Network/loadBalancers',variables('workerLbName'))]",
+    "agentprivateLbIPConfigName": "[concat(variables('workerLbIPName'), '-swarm')]",
+    "agentprivateLbIPConfigID": "[concat(variables('agentprivateLbID'),'/frontendIPConfigurations/', variables('agentprivateLbIPConfigName'))]",
     "scripturlpy": "[concat(parameters('TemplateUrl'), 'provisionSwarmVM.py')]",
     "scripturlsh": "[concat(parameters('TemplateUrl'), 'pinstallaptpackages.sh')]"
   },
@@ -100,7 +128,7 @@
       "location": "[resourceGroup().location]",
       "type": "Microsoft.Storage/storageAccounts",
       "sku": {
-        "name": "Standard_RAGRS"
+        "name": "Standard_LRS"
       },
       "kind": "Storage",
       "properties": {
@@ -115,26 +143,11 @@
       }
     },
     {
-      "apiVersion": "2016-03-30",
-      "type": "Microsoft.Network/publicIPAddresses",
-      "name": "[variables('workerLbIPName')]",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "publicIPAllocationMethod": "[parameters('publicIPsAllocationMethod')]",
-        "dnsSettings": {
-          "domainNameLabel": "[variables('workerLbDnsHost')]"
-        }
-      }
-    },
-    {
-      "comments": "Public load balancer for accessing the workers",
+      "comments": "Loadbalancer for accessing the workers",
       "apiVersion": "2016-03-30",
       "name": "[variables('workerLbName')]",
       "type": "Microsoft.Network/loadBalancers",
       "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "[concat('Microsoft.Network/publicIPAddresses/', variables('workerLbIPName'))]"
-      ],
       "properties": {
         "frontendIPConfigurations": [
           {
@@ -149,7 +162,7 @@
         ],
         "backendAddressPools": [
           {
-            "name": "WorkerBackendPool"
+            "name":"[variables('agentprivateLbBackendPoolName')]"
           }
         ],
         "inboundNatPools": [
@@ -163,6 +176,68 @@
               "frontendPortRangeStart": 50000,
               "frontendPortRangeEnd": 50119,
               "backendPort": 22
+            }
+          }
+        ],
+        "loadBalancingRules": [
+          {
+            "name": "LBRule80",
+            "properties": {
+              "backendAddressPool": {
+                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('workerLbName')), '/backendAddressPools/', variables('agentprivateLbBackendPoolName'))]"
+              },
+              "backendPort": 80,
+              "enableFloatingIP": false,
+              "frontendIPConfiguration": {
+                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('workerLbName')), '/frontendIpConfigurations/loadBalancerFrontEnd')]"
+              },
+              "frontendPort": 80,
+              "idleTimeoutInMinutes": 5,
+              "loadDistribution": "Default",
+              "probe": {
+                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('workerLbName')),'/probes/tcp80Probe')]"
+              },
+              "protocol": "Tcp"
+            }
+          },
+          {
+            "name": "LBRule443",
+            "properties": {
+              "backendAddressPool": {
+               "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('workerLbName')), '/backendAddressPools/', variables('agentprivateLbBackendPoolName'))]"
+              },
+              "backendPort": 443,
+              "enableFloatingIP": false,
+              "frontendIPConfiguration": {
+                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('workerLbName')), '/frontendIpConfigurations/loadBalancerFrontEnd')]"
+              },
+              "frontendPort": 443,
+              "idleTimeoutInMinutes": 5,
+              "loadDistribution": "Default",
+              "probe": {
+                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('workerLbName')),'/probes/tcp443Probe')]"
+              },
+              "protocol": "Tcp"
+            }
+          }
+         ],
+        "probes": [
+          {
+            "name": "tcp80Probe",
+            "properties": {
+              "intervalInSeconds": "5",
+              "numberOfProbes": "2",
+              "port": 80,
+              "protocol": "Tcp"
+            }
+          },
+          {
+            "name": "tcp443Probe",
+            "properties": {
+              "intervalInSeconds": "5",
+              "numberOfProbes": "2",
+              "port": 443,
+              "protocol": "Tcp"
             }
           }
         ]
@@ -271,10 +346,10 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            ["[variables('scripturlpy')]",
-            ["[variables('scripturlsh')]"
+             "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/provisionSwarmVM.py",
+             "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/installaptpackages.sh"
           ],
-          "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
+          "commandToExecute": "[concat('sh installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
         }
       }
     },
@@ -299,10 +374,10 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            ["[variables('scripturlpy')]",
-            ["[variables('scripturlsh')]"
+             "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/provisionSwarmVM.py",
+             "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/installaptpackages.sh"
           ],
-          "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
+          "commandToExecute": "[concat('sh installaptpackages.sh && sudo python3 provisionSwarmVM.py --role manager --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
         }
       }
     },
@@ -374,12 +449,12 @@
                         },
                         "loadBalancerBackendAddressPools": [
                           {
-                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('workerLbName'), '/backendAddressPools/WorkerBackendPool')]"
+                            "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('workerLbName')), '/backendAddressPools/', variables('agentprivateLbBackendPoolName'))]"
                           }
                         ],
                         "loadBalancerInboundNatPools": [
                           {
-                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('workerLbName'), '/inboundNatPools/WorkerNatPool')]"
+                            "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('workerLbName')), '/inboundNatPools/WorkerNatPool')]"
                           }
                         ]
                       }
@@ -400,10 +475,10 @@
                   "autoUpgradeMinorVersion": true,
                   "settings": {
                      "fileUris": [
-                        ["[variables('scripturlpy')]",
-                        ["[variables('scripturlsh')]"
-                     ],
-                    "commandToExecute": "[concat('sudo bash installaptpackages.sh && sudo python3 provisionSwarmVM.py --role worker --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
+                       "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/provisionSwarmVM.py",
+                       "https://github.com/peez80/azure-resources/raw/master/docker-native-swarm-cluster/installaptpackages.sh"
+                      ],
+                    "commandToExecute": "[concat('sh installaptpackages.sh && sudo python3 provisionSwarmVM.py --role worker --storageAccount ', variables('storageAccountName'), ' --storageAccountKey \"', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value, '\" --dockerInterfaceName eth0 --joinIp ', string(reference(concat(variables('managerVmNicNamePrefix'), '0')).ipConfigurations[0].properties.privateIPAddress))]"
                   }
                 }
               }
@@ -438,7 +513,7 @@
             "properties": {
               "privateIPAllocationMethod": "Dynamic",
               "subnet": {
-                "id": "[variables('swarmVNetSubnetRef')]"
+                "id": "[variables('JumpVNetSubnetRef')]"
               },
               "publicIpAddress": {
                 "id": "[resourceId('Microsoft.Network/publicIpAddresses', variables('jumpVmIpName'))]"
